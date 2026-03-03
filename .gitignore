@@ -1,3 +1,9 @@
 /target/
-Cargo.lock
+/Cargo.lock
 *.wasm
+
+# i18n cache directory (created at runtime inside user projects)
+.i18n-cache/
+
+# Local project config (users create this in their own projects, not committed to the extension)
+.i18n-viewer.json

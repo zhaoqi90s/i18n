@@ -1,147 +1,418 @@
 # i18n Key Translator
 
-A [Zed](https://zed.dev) extension that lets you look up i18n translation keys
-directly from the Assistant panel via slash commands.
+A [Zed Editor](https://zed.dev) extension that brings **inline i18n key previews** directly into your editor.
 
-## Commands
+Hover over any i18n key in your source code to instantly see its translated value — fetched from remote URLs or local files, cached locally, and displayed as a rich Markdown tooltip.
+
+Also ships `/i18n`, `/i18n-keys`, and `/i18n-sync` slash commands for the AI Assistant panel.
+
+---
+
+## Features
+
+| Feature | Description |
+|---|---|
+| **Hover preview** | Hover over `t("some.key")` to see the translation inline |
+| **Remote sources** | Configure URLs per language — translations are downloaded and cached |
+| **Disk cache** | Cached translations survive restarts; respects a configurable TTL |
+| **Multi-language** | Show multiple languages in a single hover card |
+| **Regex patterns** | Match any calling convention: `t(...)`, `formatMessage(...)`, `$t(...)`, etc. |
+| **Key prefix** | Strip a common namespace prefix so short keys still resolve correctly |
+| **Local fallback** | Falls back to local JSON files when no remote source is configured |
+| **Slash commands** | `/i18n`, `/i18n-keys`, and `/i18n-sync` in the Assistant panel |
+
+---
+
+## Requirements
+
+- [Zed](https://zed.dev) (any recent stable release)
+- **Node.js** — used to run the hover LSP server. Zed manages its own Node.js installation; no separate setup is needed on most systems.
+
+---
+
+## Installation
+
+### From the Zed extension registry
+
+1. Open Zed.
+2. Press `Cmd+Shift+X` (macOS) / `Ctrl+Shift+X` (Linux) to open Extensions.
+3. Search for **i18n Key Translator** and click **Install**.
+
+### As a local development extension
+
+```sh
+git clone https://github.com/yourusername/i18n-key-translator
+```
+
+Then in Zed: **Extensions → Install Dev Extension** and select the cloned directory.
+
+---
+
+## Configuration
+
+Create `.i18n-viewer.json` at the **root of your project** (next to `package.json`, `Cargo.toml`, etc.).
+
+> Copy `.i18n-viewer.json.example` (included with this extension) as a starting point.
+
+```json
+{
+  "defaultLang": "en",
+  "languages": ["en", "zh", "ja"],
+  "remoteSources": {
+    "en": "https://cdn.example.com/locales/en.json",
+    "zh": "https://cdn.example.com/locales/zh.json",
+    "ja": "https://cdn.example.com/locales/ja.json"
+  },
+  "localPaths": [
+    "locales/{lang}.json",
+    "public/locales/{lang}/translation.json"
+  ],
+  "keyPrefix": "",
+  "patterns": [
+    "formatMessage\\([\"']([^\"']+)[\"']",
+    "\\$t\\([\"']([^\"']+)[\"']",
+    "\\bt\\([\"']([^\"']+)[\"']",
+    "i18n\\.t\\([\"']([^\"']+)[\"']"
+  ],
+  "cacheDir": ".i18n-cache",
+  "ttl": 3600
+}
+```
+
+### Configuration reference
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `defaultLang` | `string` | `"en"` | Primary language shown in hover cards and used by slash commands |
+| `languages` | `string[]` | `[]` | Additional languages to include in hover cards |
+| `remoteSources` | `{ [lang]: url }` | `{}` | Map of language code → URL returning a flat or nested JSON object |
+| `localPaths` | `string[]` | *(built-in list)* | Path templates relative to the project root. `{lang}` is replaced at runtime. Overrides the built-in list when non-empty. |
+| `keyPrefix` | `string` | `""` | Prepended to every extracted key before lookup. Useful when source code uses short keys but the translation file uses fully-qualified keys (e.g. `"ns."`). |
+| `patterns` | `string[]` | *(built-in list)* | JavaScript regex strings. **Capture group 1** must capture the i18n key. Overrides the built-in list when non-empty. |
+| `cacheDir` | `string` | `".i18n-cache"` | Directory (relative to project root) where downloaded translations are stored |
+| `ttl` | `number` | `3600` | Cache lifetime in seconds. After expiry the remote source is re-fetched. |
+
+### Key prefix
+
+`keyPrefix` is useful when your translation file stores keys with a common namespace prefix but your source code only references the short form:
+
+```json
+// zh.json (flat, fully-qualified keys)
+{
+  "app.button.save": "保存",
+  "app.button.cancel": "取消"
+}
+```
+
+```ts
+// source code uses short keys
+t("button.save")
+```
+
+With `"keyPrefix": "app."`, the extension looks up `app.button.save` automatically. Lookup falls back through four strategies (flat with prefix → nested with prefix → flat without → nested without), so partial migration is handled gracefully.
+
+---
+
+## Hover preview
+
+Once configured, hover over any i18n key matched by your patterns:
+
+```ts
+// Hover over "auth.errors.invalidEmail" to see:
+//
+//   i18n key: `auth.errors.invalidEmail`
+//
+//   [en]  Please enter a valid email address.
+//   [zh]  请输入有效的电子邮件地址。
+//   [ja]  有効なメールアドレスを入力してください。
+
+const msg = t("auth.errors.invalidEmail");
+```
+
+The hover card is generated by a lightweight Node.js LSP server bundled with the extension, communicating over stdin/stdout using the standard Language Server Protocol.
+
+### Supported file types
+
+JavaScript, TypeScript, JSX, TSX, Vue, Svelte, Python, Rust, Go, Ruby, PHP, Java, Kotlin, Swift, C#.
+
+Need another language? Open an issue or PR — adding entries to `extension.toml` is the only change required.
+
+---
+
+## Translation file format
+
+Both remote and local sources must be **JSON** (flat or nested):
+
+```json
+{
+  "common": {
+    "button": {
+      "save": "Save",
+      "cancel": "Cancel"
+    }
+  },
+  "auth": {
+    "errors": {
+      "invalidEmail": "Please enter a valid email address."
+    }
+  }
+}
+```
+
+Keys are accessed using **dot notation**: `common.button.save`.
+
+---
+
+## Patterns
+
+The `patterns` array accepts JavaScript-compatible regex strings. **Capture group 1** must contain the i18n key.
+
+Providing a `patterns` array in your config **replaces** the built-in list entirely.
+
+### Built-in patterns
+
+| Pattern | Matches |
+|---|---|
+| `formatMessage\(["']([^"']+)["']` | `formatMessage("key")` |
+| `\$t\(["']([^"']+)["']` | `$t('key')` (Vue) |
+| `\bt\(["']([^"']+)["']` | `t('key')` (i18next, react-i18next) |
+| `i18n\.t\(["']([^"']+)["']` | `i18n.t('key')` |
+| `i18n\(["']([^"']+)["']` | `i18n('key')` |
+| `gettext\(["']([^"']+)["']` | `gettext('key')` |
+| `translate\(["']([^"']+)["']` | `translate('key')` |
+| `intl\.formatMessage\(\{[^}]*id:\s*["']([^"']+)["']` | `intl.formatMessage({ id: 'key' })` |
+| `<Trans[^>]+i18nKey=["']([^"']+)["']` | `<Trans i18nKey="key" />` (React) |
+
+---
+
+## Remote source caching
+
+1. On first hover, the translation file is downloaded from the configured URL.
+2. The response is saved to `<cacheDir>/<lang>.json` inside your project.
+3. Subsequent hovers use the disk cache until `ttl` seconds have elapsed.
+4. When the TTL expires the file is re-fetched in the background.
+
+> **Tip:** Add `.i18n-cache/` to your project's `.gitignore` to avoid committing cached translations.
+
+---
+
+## Slash commands
+
+The extension registers three slash commands for the **AI Assistant** panel.
 
 ### `/i18n <key> [lang]`
 
-Look up the translation for a given key in the specified language.
+Look up a translation key and display its value.
 
 ```
 /i18n common.button.save
-/i18n common.button.save zh
-/i18n auth.errors.invalidEmail fr
-```
-
-- `key` — dot-notation path to the translation (e.g. `common.button.save`)
-- `lang` — BCP 47 language code (optional, defaults to `en` or your configured `defaultLang`)
-
-When a key points to a **namespace** (an object rather than a string), all
-leaf key-value pairs under that namespace are shown:
-
-```
-/i18n common.button zh
-─────────────────────────────────────────
-save: 保存
-cancel: 取消
-confirm: 确认
+/i18n auth.errors.invalidEmail zh
 ```
 
 ### `/i18n-keys [lang]`
 
-List every dot-notation key in the translation file for a given language.
-Useful for discovering what keys are available before looking them up.
+List all leaf keys in the translation file for a given language, sorted alphabetically.
 
 ```
 /i18n-keys
-/i18n-keys zh
+/i18n-keys ja
 ```
 
-## Supported file layouts
+### `/i18n-sync [lang]`
 
-The extension searches a set of well-known paths automatically.
-`{lang}` is replaced with the language code you provide.
+Show the current cache status for all configured languages and trigger a remote download. When no language is specified all configured remote sources are synced.
 
-| Pattern | Frameworks |
-|---|---|
-| `locales/{lang}.json` | Generic, Vue i18n |
-| `locale/{lang}.json` | Generic |
-| `i18n/{lang}.json` | Generic |
-| `translations/{lang}.json` | Generic |
-| `lang/{lang}.json` | Generic |
-| `public/locales/{lang}/translation.json` | i18next / react-i18next |
-| `public/locales/{lang}/common.json` | i18next |
-| `locales/{lang}/translation.json` | i18next |
-| `src/locales/{lang}.json` | Vue i18n, Angular |
-| `src/i18n/{lang}.json` | Angular |
-| `src/assets/locales/{lang}.json` | Angular |
-| `assets/i18n/{lang}.json` | Angular |
-| `lib/l10n/app_{lang}.arb` | Flutter |
-
-If your project uses a different layout, see [Custom configuration](#custom-configuration) below.
-
-## Custom configuration
-
-Create a `.i18n-viewer.json` file at the **root of your project** to override
-the defaults:
-
-```json
-{
-  "defaultLang": "zh",
-  "paths": [
-    "resources/lang/{lang}.json",
-    "config/i18n/{lang}/messages.json"
-  ]
-}
+```
+/i18n-sync
+/i18n-sync zh
 ```
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `defaultLang` | `string` | `"en"` | Language used when no `[lang]` argument is given |
-| `paths` | `string[]` | (built-in list) | Ordered list of path templates to try. `{lang}` is substituted at runtime. If set, the built-in list is **replaced** (not merged). |
+> **Note:** `/i18n-sync` requires at least one supported source file to be open so the LSP server is running. If the server hasn't started yet, open any JS/TS/etc. file and re-run the command.
 
-## Installation (dev extension)
+All three commands respect `.i18n-viewer.json` configuration and the same local file search order as the hover feature.
 
-> **Prerequisites:** [Rust must be installed via `rustup`](https://rustup.rs).
-> Installing via Homebrew or other means will not work with Zed dev extensions.
+---
 
-1. Clone this repository:
-   ```sh
-   git clone https://github.com/yourusername/i18n-key-translator
-   ```
+## Local path templates
 
-2. Open Zed and press `Cmd+Shift+X` (macOS) or `Ctrl+Shift+X` (Linux/Windows)
-   to open the Extensions panel.
+When `localPaths` is empty (or not set), the extension searches these paths automatically:
 
-3. Click **Install Dev Extension** and select the cloned directory.
+```
+locales/{lang}.json
+locale/{lang}.json
+i18n/{lang}.json
+translations/{lang}.json
+lang/{lang}.json
+public/locales/{lang}/translation.json
+public/locales/{lang}/common.json
+public/locales/{lang}/index.json
+locales/{lang}/translation.json
+locales/{lang}/index.json
+locales/{lang}/common.json
+locale/{lang}/translation.json
+src/locales/{lang}.json
+src/i18n/{lang}.json
+src/i18n/locales/{lang}.json
+src/assets/locales/{lang}.json
+assets/locales/{lang}.json
+assets/i18n/{lang}.json
+lib/l10n/app_{lang}.arb
+```
 
-4. Zed will compile the extension to WebAssembly — this takes a moment on the
-   first build.
+---
 
-5. Open the Assistant panel (`Cmd+?` or `Ctrl+?`) and type `/i18n` to start.
+## Architecture
 
-### Rebuilding after changes
+```
+┌─────────────────────────────────┐
+│  Zed Editor                     │
+│  ┌──────────────────────────┐   │
+│  │ Extension (WASM)         │   │   Slash commands
+│  │  src/lib.rs              │   │   /i18n  /i18n-keys  /i18n-sync
+│  │  src/config.rs           │   │
+│  │  src/translation.rs      │   │
+│  │  src/commands/           │   │
+│  └──────────┬───────────────┘   │
+│             │ language_server_command
+│             ▼                   │
+│  ┌──────────────────────────┐   │
+│  │ LSP Server (Node.js)     │   │   Hover preview
+│  │  lsp/server.js           │   │   textDocument/hover
+│  │                          │   │
+│  │  • reads .i18n-viewer    │   │
+│  │  • fetches remote URLs   │   │
+│  │  • reads local files     │   │
+│  │  • memory + disk cache   │   │
+│  │  • polls .sync-request   │   │
+│  └──────────────────────────┘   │
+└─────────────────────────────────┘
+```
 
-After editing the source, click **Rebuild** next to the extension in the
-Extensions panel, or re-run **Install Dev Extension**.
+- The **WASM extension** handles slash commands and starts the LSP server. It cannot make HTTP requests directly; remote fetching is delegated to the LSP server via a `.sync-request` IPC file.
+- The **Node.js LSP server** handles `textDocument/hover` over stdin/stdout. It has **no npm dependencies** — only Node.js built-in modules (`http`, `https`, `fs`, `path`).
+
+---
+
+## Development
+
+### Prerequisites
+
+| Tool | Notes |
+|------|-------|
+| **Rust** | Install via [rustup](https://rustup.rs), **not** Homebrew |
+| **wasm32-wasip2 target** | `rustup target add wasm32-wasip2` |
+| **Node.js** | Only needed to run the syntax check; Zed ships its own copy for the extension |
+
+### Project layout
+
+```
+src/
+├── lib.rs           # Extension entry point — Extension trait impl, LSP startup
+├── langs.rs         # COMMON_LANGS list used for slash-command argument completions
+├── config.rs        # Config struct, DEFAULT_PATH_TEMPLATES, load_config()
+├── translation.rs   # File resolution, JSON formatting, key lookup, key enumeration
+└── commands/
+    ├── mod.rs
+    ├── i18n.rs      # /i18n command
+    ├── i18n_keys.rs # /i18n-keys command
+    └── i18n_sync.rs # /i18n-sync command
+lsp/
+└── server.js        # Node.js LSP server — handles textDocument/hover
+```
+
+> **Important:** `server.js` is embedded into the WASM binary at compile time via
+> `include_str!`. Changes to either Rust code **or** `lsp/server.js` require a
+> WASM rebuild to take effect.
+
+### First-time setup
+
+```sh
+git clone https://github.com/yourusername/i18n-key-translator
+cd i18n-key-translator
+
+# Add the WASM target if you haven't already
+rustup target add wasm32-wasip2
+
+# Register the extension in Zed:
+# Extensions → Install Dev Extension → select this directory
+```
+
+### Development loop
+
+```sh
+# 1. Check for compile errors quickly (no WASM output, very fast)
+cargo check --target wasm32-wasip2
+
+# 2. Verify server.js syntax before a full build
+node --check lsp/server.js
+
+# 3. Build the WASM binary
+cargo build --target wasm32-wasip2
+
+# 4. Reload the extension in Zed without restarting:
+#    Command Palette → "zed: reload extensions"
+```
+
+### Viewing logs
+
+```sh
+# Option A — command palette (while Zed is running)
+# Command Palette → "zed: open log"
+
+# Option B — print logs directly to the terminal
+zed --foreground
+```
+
+### Testing the LSP server manually
+
+```sh
+node lsp/server.js
+# Send LSP JSON-RPC messages on stdin, read responses on stdout.
+# Example initialize request:
+# {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+```
+
+---
 
 ## Troubleshooting
 
-### The command returns "No translation file found"
+### "No translation file found"
 
-1. Check that your project is open as a folder (not just a single file).
-2. Run `/i18n-keys` without a key to see which paths were tried.
-3. Add a `.i18n-viewer.json` with the correct `paths` for your project.
+1. Confirm you have a **project folder** open, not just a single file.
+2. Run `/i18n-keys` without arguments — the error output lists every path that was tried.
+3. Add `.i18n-viewer.json` with `localPaths` or `remoteSources` matching your project layout.
 
-### Parsing errors
+### Hover shows nothing
 
-The extension expects standard JSON. Make sure your translation file:
+1. Check that your `patterns` match the calling convention in your code.
+2. Run `Zed: Open Log` in the command palette to see LSP server output (written to stderr).
+3. Confirm Zed has downloaded its built-in Node.js (happens automatically on first use).
+
+### `/i18n-sync` says the LSP server hasn't started
+
+Open any supported source file (`.ts`, `.js`, `.vue`, etc.) so the language server activates, then re-run `/i18n-sync`.
+
+### Translation file parse error
+
+The extension only supports standard JSON. Verify your file:
 - Has no trailing commas
-- Uses UTF-8 encoding
-- Is not a YAML or TOML file (only JSON and `.arb` are supported)
+- Is saved as UTF-8
+- Is not YAML, TOML, or JSON5
 
-### Build fails / Rust errors
+### WASM build fails
 
-- Ensure Rust was installed via `rustup` (not Homebrew).
+- Make sure Rust is installed via `rustup`, not Homebrew.
 - Run `rustup target add wasm32-wasip2` if the target is missing.
-- Check `Zed: Open Log` in the command palette for detailed error output.
-- Launching Zed with `zed --foreground` prints extension logs to the terminal.
+- Run `zed --foreground` to print extension logs directly to the terminal.
 
-## Project structure
+---
 
-```
-i18n-key-translator/
-├── extension.toml        # Extension manifest (id, name, slash commands)
-├── Cargo.toml            # Rust crate configuration
-├── src/
-│   └── lib.rs            # All extension logic (WASM entry point)
-├── .i18n-viewer.json     # (optional) per-project config — add to your project, not here
-├── LICENSE
-└── README.md
-```
+## Contributing
+
+Pull requests are welcome! Please open an issue first for major changes.
+
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](./LICENSE).

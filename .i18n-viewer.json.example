@@ -1,0 +1,60 @@
+{
+  "_comment": "Rename this file to .i18n-viewer.json at your project root to configure i18n Key Translator.",
+
+  "defaultLang": "zh",
+
+  "languages": ["en", "zh", "ja"],
+
+  "remoteSources": {
+    "en": "https://example.com/locales/en.json",
+    "zh": "https://example.com/locales/zh.json",
+    "ja": "https://example.com/locales/ja.json"
+  },
+
+  "localPaths": [
+    "locales/{lang}.json",
+    "public/locales/{lang}/translation.json",
+    "src/i18n/{lang}.json"
+  ],
+
+  "_comment_keyPrefix": [
+    "keyPrefix is prepended to every extracted key before performing the translation lookup.",
+    "This is useful when your translation files use a flat key/value structure with a common",
+    "namespace prefix, and your source code only references the short key.",
+    "",
+    "Example flat translation file (zh.json):",
+    "  {",
+    "    \"isv-common.language.ar\": \"阿拉伯语\",",
+    "    \"isv-common.language.bg\": \"保加利亚语\"",
+    "  }",
+    "",
+    "With keyPrefix set to \"isv-common.language.\", a call like:",
+    "  formatMessage('ar')",
+    "will look up the full key \"isv-common.language.ar\" in the translation file.",
+    "",
+    "Lookup order (stops at the first hit):",
+    "  1. data[prefix + key]       — flat format with prefix (recommended)",
+    "  2. data.prefix.key          — nested dot-notation with prefix (fallback)",
+    "  3. data[key]                — flat format without prefix (fallback)",
+    "  4. data.key                 — nested dot-notation without prefix (fallback)",
+    "",
+    "Set to \"\" or omit to disable prefix behaviour."
+  ],
+  "keyPrefix": "isv-common.language.",
+
+  "patterns": [
+    "formatMessage\\([\"']([^\"']+)[\"']",
+    "\\$t\\([\"']([^\"']+)[\"']",
+    "\\bt\\([\"']([^\"']+)[\"']",
+    "i18n\\.t\\([\"']([^\"']+)[\"']",
+    "i18n\\([\"']([^\"']+)[\"']",
+    "gettext\\([\"']([^\"']+)[\"']",
+    "translate\\([\"']([^\"']+)[\"']",
+    "intl\\.formatMessage\\(\\{[^}]*id:\\s*[\"']([^\"']+)[\"']",
+    "<Trans[^>]+i18nKey=[\"']([^\"']+)[\"']"
+  ],
+
+  "cacheDir": ".i18n-cache",
+
+  "ttl": 3600
+}
