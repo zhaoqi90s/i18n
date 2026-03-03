@@ -221,3 +221,128 @@ pub fn collect_keys(value: &serde_json::Value, prefix: &str, keys: &mut Vec<Stri
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Entry enumeration (key + value pairs)
+// ---------------------------------------------------------------------------
+
+/// Collect all leaf `(key, value)` pairs from a JSON value into `entries`.
+/// `prefix` is the dot-path accumulated so far (empty for the root call).
+pub fn collect_entries(
+    value: &serde_json::Value,
+    prefix: &str,
+    entries: &mut Vec<(String, String)>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let full_key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                collect_entries(v, &full_key, entries);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                let indexed_key = if prefix.is_empty() {
+                    format!("[{i}]")
+                } else {
+                    format!("{prefix}[{i}]")
+                };
+                collect_entries(v, &indexed_key, entries);
+            }
+        }
+        serde_json::Value::String(s) => {
+            if !prefix.is_empty() {
+                entries.push((prefix.to_string(), s.clone()));
+            }
+        }
+        serde_json::Value::Number(n) => {
+            if !prefix.is_empty() {
+                entries.push((prefix.to_string(), n.to_string()));
+            }
+        }
+        serde_json::Value::Bool(b) => {
+            if !prefix.is_empty() {
+                entries.push((prefix.to_string(), b.to_string()));
+            }
+        }
+        serde_json::Value::Null => {
+            if !prefix.is_empty() {
+                entries.push((prefix.to_string(), "(null)".to_string()));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy matching
+// ---------------------------------------------------------------------------
+
+/// Fuzzy-match `query` against `text` and return a relevance score.
+///
+/// Scoring tiers (higher = better match):
+///   10000  — exact case-insensitive match
+///    5000+ — substring match (bonus for position & coverage)
+///    3000  — all whitespace-separated query words appear in text
+///     1+   — all query characters appear in order (classic fuzzy)
+///
+/// Returns `None` if no match is found.
+pub fn fuzzy_score(query: &str, text: &str) -> Option<u32> {
+    if query.is_empty() {
+        return None;
+    }
+
+    let q = query.to_lowercase();
+    let t = text.to_lowercase();
+
+    // Tier 1: exact match
+    if t == q {
+        return Some(10000);
+    }
+
+    // Tier 2: substring match
+    if let Some(pos) = t.find(q.as_str()) {
+        // Coverage: how much of the text the query spans (0–100)
+        let coverage = (q.len() * 100 / t.len().max(1)) as u32;
+        // Position bonus: earlier matches score higher
+        let position_bonus = 100u32.saturating_sub(pos as u32);
+        return Some(5000 + coverage * 10 + position_bonus);
+    }
+
+    // Tier 3: all query words appear somewhere in the text (any order)
+    let words: Vec<&str> = q.split_whitespace().collect();
+    if words.len() > 1 && words.iter().all(|w| t.contains(w)) {
+        return Some(3000);
+    }
+
+    // Tier 4: all query characters appear in order (classic fuzzy)
+    let mut qi = q.chars().peekable();
+    let mut score: u32 = 0;
+    let mut consecutive: u32 = 0;
+    let mut first_match_pos: Option<usize> = None;
+
+    for (pos, c) in t.chars().enumerate() {
+        if qi.peek() == Some(&c) {
+            qi.next();
+            consecutive += 1;
+            // Consecutive character runs get an exponential bonus
+            score += consecutive * 2;
+            if first_match_pos.is_none() {
+                first_match_pos = Some(pos);
+            }
+        } else {
+            consecutive = 0;
+        }
+    }
+
+    if qi.peek().is_none() {
+        // Earlier first match = higher score
+        let pos_bonus = 50u32.saturating_sub(first_match_pos.unwrap_or(0) as u32);
+        Some(score + pos_bonus)
+    } else {
+        None
+    }
+}

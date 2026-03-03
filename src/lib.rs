@@ -3,7 +3,7 @@ mod config;
 mod langs;
 mod translation;
 
-use commands::{run_i18n, run_i18n_keys, run_i18n_sync};
+use commands::{run_i18n, run_i18n_keys, run_i18n_search, run_i18n_sync};
 use langs::COMMON_LANGS;
 use zed_extension_api::{
     self as zed, node_binary_path, Command, LanguageServerId, SlashCommand,
@@ -101,8 +101,17 @@ impl zed::Extension for I18nTranslatorExtension {
                     Ok(vec![])
                 }
             }
-            // /i18n-keys [lang] and /i18n-sync [lang] — only arg is the language
+            // /i18n-keys [lang], /i18n-sync [lang] and /i18n-search <text> [lang]
+            // — second (or only) arg is the language
             "i18n-keys" | "i18n-sync" => Ok(lang_completions()),
+            "i18n-search" => {
+                // Only offer language completions once the query text has been typed
+                if args.len() >= 1 {
+                    Ok(lang_completions())
+                } else {
+                    Ok(vec![])
+                }
+            }
 
             unknown => Err(format!("unknown slash command: \"{unknown}\"")),
         }
@@ -119,6 +128,7 @@ impl zed::Extension for I18nTranslatorExtension {
         match command.name.as_str() {
             "i18n" => run_i18n(args, worktree),
             "i18n-keys" => run_i18n_keys(args, worktree),
+            "i18n-search" => run_i18n_search(args, worktree),
             "i18n-sync" => {
                 // Derive the IPC file path from the server.js location stored on self.
                 // server.js lives at  <work_dir>/lsp/server.js
