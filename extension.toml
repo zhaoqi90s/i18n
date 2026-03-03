@@ -18,6 +18,10 @@ requires_argument = false
 description = "Show sync status and update remote language pack cache: /i18n-sync [lang]"
 requires_argument = false
 
+[slash_commands.i18n-search]
+description = "Fuzzy-search translation values and return matching keys: /i18n-search <text> [lang]  (e.g. /i18n-search 保存 zh)"
+requires_argument = true
+
 [language_servers.i18n-hover]
 name = "i18n Hover"
 languages = [

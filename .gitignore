@@ -1,6 +1,7 @@
 /target/
 /Cargo.lock
 *.wasm
+!extension.wasm
 
 # i18n cache directory (created at runtime inside user projects)
 .i18n-cache/
