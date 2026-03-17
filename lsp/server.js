@@ -162,6 +162,28 @@ const DEFAULTS = {
   keyPrefix: "",
   cacheDir: ".i18n-cache",
   ttl: 3600,
+  // Cache key formatting options
+  cacheFormat: {
+    enabled: false,
+    strategy: "none",
+    indent: 2,
+    extract: {
+      skip: 0,
+      segments: 10,
+      from: "end",
+    },
+    removePrefix: {
+      prefixes: [],
+    },
+    replace: {
+      pattern: "",
+      replacement: "",
+      flags: "g",
+    },
+    custom: {
+      mappings: {},
+    },
+  },
 };
 
 const FALLBACK_LOCAL_TEMPLATES = [
@@ -183,6 +205,119 @@ const FALLBACK_LOCAL_TEMPLATES = [
   "assets/locales/{lang}.json",
   "assets/i18n/{lang}.json",
 ];
+
+// --- Cache format configuration ---
+
+function loadCacheFormat(raw, defaults) {
+  if (!raw || typeof raw !== "object") return defaults;
+  return {
+    enabled: raw.enabled === true,
+    strategy: raw.strategy || defaults.strategy,
+    indent: typeof raw.indent === "number" ? raw.indent : defaults.indent,
+    extract:
+      raw.extract && typeof raw.extract === "object"
+        ? {
+            skip:
+              typeof raw.extract.skip === "number"
+                ? raw.extract.skip
+                : defaults.extract.skip,
+            segments: raw.extract.segments || defaults.extract.segments,
+            from: raw.extract.from === "start" ? "start" : "end",
+          }
+        : defaults.extract,
+    removePrefix:
+      raw.removePrefix && typeof raw.removePrefix === "object"
+        ? {
+            prefixes: Array.isArray(raw.removePrefix.prefixes)
+              ? raw.removePrefix.prefixes
+              : [],
+          }
+        : defaults.removePrefix,
+    replace:
+      raw.replace && typeof raw.replace === "object"
+        ? {
+            pattern: raw.replace.pattern || "",
+            replacement: raw.replace.replacement || "",
+            flags: raw.replace.flags || "g",
+          }
+        : defaults.replace,
+    custom:
+      raw.custom && typeof raw.custom === "object"
+        ? { mappings: raw.custom.mappings || {} }
+        : defaults.custom,
+  };
+}
+
+function transformCacheKeys(data, formatConfig) {
+  if (
+    !formatConfig ||
+    !formatConfig.enabled ||
+    formatConfig.strategy === "none"
+  )
+    return data;
+  const result = {};
+  const strategy = formatConfig.strategy;
+  for (const [key, value] of Object.entries(data)) {
+    const newKey = transformKey(key, strategy, formatConfig);
+    result[newKey] = value;
+  }
+  return result;
+}
+
+function transformKey(key, strategy, config) {
+  switch (strategy) {
+    case "extract":
+      return extractKeySegments(key, config.extract);
+    case "removePrefix":
+      return removeKeyPrefix(key, config.removePrefix);
+    case "replace":
+      return replaceKeyPattern(key, config.replace);
+    case "custom":
+      return applyCustomMapping(key, config.custom);
+    default:
+      return key;
+  }
+}
+
+function extractKeySegments(key, options) {
+  if (!options) return key;
+  const parts = key.split(".");
+  const skip = options.skip || 0;
+  const segments = options.segments || 10;
+
+  if (parts.length <= skip) return key;
+
+  const remaining = parts.slice(skip);
+  return options.from === "start"
+    ? remaining.slice(0, segments).join(".")
+    : remaining.slice(-segments).join(".");
+}
+
+function removeKeyPrefix(key, options) {
+  if (!options || !options.prefixes || options.prefixes.length === 0)
+    return key;
+  for (const prefix of options.prefixes) {
+    if (key.startsWith(prefix)) return key.slice(prefix.length);
+  }
+  return key;
+}
+
+function replaceKeyPattern(key, options) {
+  if (!options || !options.pattern) return key;
+  try {
+    return key.replace(
+      new RegExp(options.pattern, options.flags || "g"),
+      options.replacement || "",
+    );
+  } catch {
+    return key;
+  }
+}
+
+function applyCustomMapping(key, options) {
+  if (!options || !options.mappings) return key;
+  return options.mappings[key] || key;
+}
 
 // ─── Configuration loading ────────────────────────────────────────────────────
 
@@ -219,6 +354,7 @@ function loadConfig() {
       typeof raw.keyPrefix === "string" ? raw.keyPrefix : defaults.keyPrefix,
     cacheDir: raw.cacheDir || defaults.cacheDir,
     ttl: typeof raw.ttl === "number" ? raw.ttl : defaults.ttl,
+    cacheFormat: loadCacheFormat(raw.cacheFormat, defaults.cacheFormat),
   };
 }
 
@@ -309,7 +445,13 @@ async function syncTranslations(langs) {
     // ── 3. Re-fetch ──────────────────────────────────────────────────────────
     try {
       logInfo(`[sync] Fetching ${lang} from ${remoteUrl}`);
-      const data = await fetchUrl(remoteUrl);
+      const rawData = await fetchUrl(remoteUrl);
+
+      // Apply cache key formatting if enabled
+      const data = config.cacheFormat?.enabled
+        ? formatCacheKeys(rawData, config.cacheFormat)
+        : rawData;
+
       const keys = countLeafKeys(data);
 
       memCache[lang] = { data, at: Date.now() };
@@ -317,7 +459,12 @@ async function syncTranslations(langs) {
       if (diskPath) {
         try {
           fs.mkdirSync(path.dirname(diskPath), { recursive: true });
-          fs.writeFileSync(diskPath, JSON.stringify(data, null, 2), "utf8");
+          const indent = config.cacheFormat?.indent ?? 2;
+          fs.writeFileSync(
+            diskPath,
+            JSON.stringify(data, null, indent),
+            "utf8",
+          );
           logInfo(`[sync] Cached ${lang} → ${diskPath} (${keys} keys)`);
         } catch (e) {
           logError(`[sync] Could not write disk cache for ${lang}:`, e.message);
@@ -332,83 +479,6 @@ async function syncTranslations(langs) {
   }
 
   return results;
-}
-
-// ─── Translation loading with caching ────────────────────────────────────────
-
-async function getTranslations(lang) {
-  const config = cfg || DEFAULTS;
-  const ttlMs = config.ttl * 1000;
-
-  // 1. Hot in-memory cache
-  const hit = memCache[lang];
-  if (hit && Date.now() - hit.at < ttlMs) return hit.data;
-
-  // 2. Disk cache (within the workspace's cacheDir)
-  const diskPath = workspacePath
-    ? path.join(workspacePath, config.cacheDir, lang + ".json")
-    : null;
-
-  if (diskPath) {
-    try {
-      const stat = fs.statSync(diskPath);
-      if (Date.now() - stat.mtimeMs < ttlMs) {
-        const data = JSON.parse(fs.readFileSync(diskPath, "utf8"));
-        memCache[lang] = { data, at: stat.mtimeMs };
-        return data;
-      }
-    } catch (_) {
-      /* cache miss */
-    }
-  }
-
-  // 3. Remote source
-  const remoteUrl = config.remoteSources[lang];
-  if (remoteUrl) {
-    try {
-      logInfo("Fetching remote translations for", lang, "from", remoteUrl);
-      const data = await fetchUrl(remoteUrl);
-      memCache[lang] = { data, at: Date.now() };
-
-      if (diskPath) {
-        try {
-          fs.mkdirSync(path.dirname(diskPath), { recursive: true });
-          fs.writeFileSync(diskPath, JSON.stringify(data), "utf8");
-          logInfo("Cached", lang, "to", diskPath);
-        } catch (e) {
-          logError("Could not write disk cache:", e.message);
-        }
-      }
-
-      return data;
-    } catch (e) {
-      logError("Remote fetch failed for", lang + ":", e.message);
-      // fall through to local
-    }
-  }
-
-  // 4. Local files
-  if (workspacePath) {
-    const templates =
-      config.localPaths.length > 0
-        ? config.localPaths
-        : FALLBACK_LOCAL_TEMPLATES;
-
-    for (const tpl of templates) {
-      const filePath = path.join(workspacePath, tpl.replace(/\{lang\}/g, lang));
-      try {
-        const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
-        logInfo("Loaded local translations for", lang, "from", filePath);
-        memCache[lang] = { data, at: Date.now() };
-        return data;
-      } catch (_) {
-        /* try next */
-      }
-    }
-  }
-
-  logInfo("No translations found for", lang);
-  return null;
 }
 
 // ─── Key extraction ───────────────────────────────────────────────────────────
@@ -513,6 +583,87 @@ function formatValue(value) {
   if (typeof value === "object")
     return "```json\n" + JSON.stringify(value, null, 2) + "\n```";
   return String(value);
+}
+
+// ─── Translation loading with caching ────────────────────────────────────────
+
+async function getTranslations(lang) {
+  const config = cfg || DEFAULTS;
+  const ttlMs = config.ttl * 1000;
+
+  // 1. Hot in-memory cache
+  const hit = memCache[lang];
+  if (hit && Date.now() - hit.at < ttlMs) return hit.data;
+
+  // 2. Disk cache (within the workspace's cacheDir)
+  const diskPath = workspacePath
+    ? path.join(workspacePath, config.cacheDir, lang + ".json")
+    : null;
+
+  if (diskPath) {
+    try {
+      const stat = fs.statSync(diskPath);
+      if (Date.now() - stat.mtimeMs < ttlMs) {
+        const data = JSON.parse(fs.readFileSync(diskPath, "utf8"));
+        memCache[lang] = { data, at: stat.mtimeMs };
+        return data;
+      }
+    } catch (_) {
+      /* cache miss */
+    }
+  }
+
+  // 3. Remote source
+  const remoteUrl = config.remoteSources[lang];
+  if (remoteUrl) {
+    try {
+      logInfo("Fetching remote translations for", lang, "from", remoteUrl);
+      const rawData = await fetchUrl(remoteUrl);
+
+      const data = config.cacheFormat?.enabled
+        ? transformCacheKeys(rawData, config.cacheFormat)
+        : rawData;
+
+      memCache[lang] = { data, at: Date.now() };
+
+      if (diskPath) {
+        try {
+          fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+          fs.writeFileSync(diskPath, JSON.stringify(data), "utf8");
+          logInfo("Cached", lang, "to", diskPath);
+        } catch (e) {
+          logError("Could not write disk cache:", e.message);
+        }
+      }
+
+      return data;
+    } catch (e) {
+      logError("Remote fetch failed for", lang + ":", e.message);
+    }
+  }
+
+  // 4. Local files
+  if (workspacePath) {
+    const templates =
+      config.localPaths.length > 0
+        ? config.localPaths
+        : FALLBACK_LOCAL_TEMPLATES;
+
+    for (const tpl of templates) {
+      const filePath = path.join(workspacePath, tpl.replace(/\{lang\}/g, lang));
+      try {
+        const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+        logInfo("Loaded local translations for", lang, "from", filePath);
+        memCache[lang] = { data, at: Date.now() };
+        return data;
+      } catch (_) {
+        /* try next */
+      }
+    }
+  }
+
+  logInfo("No translations found for", lang);
+  return null;
 }
 
 // ─── Hover content builder ────────────────────────────────────────────────────

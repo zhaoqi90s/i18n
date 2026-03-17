@@ -1,5 +1,5 @@
 {
-  "_comment": "Rename this file to .i18n-viewer.json at your project root to configure i18n Key Translator.",
+  "_comment": "将此文件重命名为 .i18n-viewer.json 放在项目根目录来配置 i18n Key Translator。",
 
   "defaultLang": "zh",
 
@@ -18,27 +18,27 @@
   ],
 
   "_comment_keyPrefix": [
-    "keyPrefix is prepended to every extracted key before performing the translation lookup.",
-    "This is useful when your translation files use a flat key/value structure with a common",
-    "namespace prefix, and your source code only references the short key.",
+    "keyPrefix 是在执行翻译查找之前预先添加到每个提取的键前缀。",
+    "当你的翻译文件使用带公共命名空间前缀的扁平键/值结构，",
+    "而你的源代码只引用短键时，这非常有用。",
     "",
-    "Example flat translation file (zh.json):",
+    "扁平翻译文件示例 (zh.json):",
     "  {",
     "    \"isv-common.language.ar\": \"阿拉伯语\",",
     "    \"isv-common.language.bg\": \"保加利亚语\"",
     "  }",
     "",
-    "With keyPrefix set to \"isv-common.language.\", a call like:",
+    "设置 keyPrefix 为 \"isv-common.language.\" 后，调用:",
     "  formatMessage('ar')",
-    "will look up the full key \"isv-common.language.ar\" in the translation file.",
+    "将在翻译文件中查找完整键 \"isv-common.language.ar\"。",
     "",
-    "Lookup order (stops at the first hit):",
-    "  1. data[prefix + key]       — flat format with prefix (recommended)",
-    "  2. data.prefix.key          — nested dot-notation with prefix (fallback)",
-    "  3. data[key]                — flat format without prefix (fallback)",
-    "  4. data.key                 — nested dot-notation without prefix (fallback)",
+    "查找顺序（首次命中即停止）:",
+    "  1. data[prefix + key]       — 带前缀的扁平格式（推荐）",
+    "  2. data.prefix.key          — 带前缀的嵌套点表示法（回退）",
+    "  3. data[key]                — 无前缀的扁平格式（回退）",
+    "  4. data.key                 — 无前缀的嵌套点表示法（回退）",
     "",
-    "Set to \"\" or omit to disable prefix behaviour."
+    "设为 \"\" 或省略以禁用前缀行为。"
   ],
   "keyPrefix": "isv-common.language.",
 
@@ -50,11 +50,59 @@
     "i18n\\([\"']([^\"']+)[\"']",
     "gettext\\([\"']([^\"']+)[\"']",
     "translate\\([\"']([^\"']+)[\"']",
-    "intl\\.formatMessage\\(\\{[^}]*id:\\s*[\"']([^\"']+)[\"']",
-    "<Trans[^>]+i18nKey=[\"']([^\"']+)[\"']"
+    "intl\\.formatMessage\\(\\{[^}]*id:\\s*[\"']([^\\'\"]+)[\"']",
+    "<Trans[^>]+i18nKey=[\"']([^\\'\"]+)[\"']"
   ],
 
   "cacheDir": ".i18n-cache",
 
-  "ttl": 3600
+  "ttl": 3600,
+
+  "_comment_cacheFormat": [
+    "cacheFormat 控制写入磁盘缓存时如何转换键。",
+    "当远程翻译文件的键名很长你想要简化时，这非常有用。",
+    "",
+    "配置选项:",
+    "  enabled:    启用键转换（默认: false）",
+    "  strategy:   转换策略: none | extract | removePrefix | replace | custom",
+    "  indent:     缓存文件的 JSON 缩进（默认: 2）",
+    "",
+    "策略: extract - 提取键段（例如，'a.b.c.d' -> 'c.d'）",
+    "  extract.skip:      跳过的段数（默认: 0，例如 skip:2,segments:3,from:'start' 表示跳过前2段取3段）",
+    "  extract.segments:  保留的段数（默认: 2）",
+    "  extract.from:      'end' 或 'start'（默认: 'end'，在跳过后的剩余部分中提取）",
+    "",
+    "策略: removePrefix - 移除常见前缀",
+    "  removePrefix.prefixes: 要移除的前缀字符串数组",
+    "",
+    "策略: replace - 正则表达式模式替换",
+    "  replace.pattern:      正则表达式模式字符串",
+    "  replace.replacement: 替换字符串",
+    "  replace.flags:        正则表达式标志（默认: 'g'）",
+    "",
+    "策略: custom - 显式键映射",
+    "  custom.mappings: { '旧键': '新键', ... }",
+    "",
+    "示例 - 跳过前2段，保留后面的3段 ('a.b.c.d.e' -> 'c.d.e'):",
+    "  { \"enabled\": true, \"strategy\": \"extract\", \"extract\": { \"skip\": 2, \"segments\": 3, \"from\": \"start\" } }",
+    "",
+    "示例 - 提取最后 2 段:",
+    "  { \"enabled\": true, \"strategy\": \"extract\", \"extract\": { \"segments\": 2, \"from\": \"end\" } }",
+    "",
+    "示例 - 移除前缀:",
+    "  { \"enabled\": true, \"strategy\": \"removePrefix\", \"removePrefix\": { \"prefixes\": [\"isv-common.\"] } }"
+  ],
+  "cacheFormat": {
+    "enabled": false,
+    "strategy": "none",
+    "indent": 2,
+    "extract": {
+      "skip": 0,
+      "segments": 2,
+      "from": "end"
+    },
+    "removePrefix": {
+      "prefixes": []
+    }
+  }
 }

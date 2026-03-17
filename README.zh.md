@@ -18,8 +18,9 @@
 | **多语言展示** | 在单个悬停卡片中同时展示多种语言的翻译 |
 | **正则匹配** | 支持任意调用方式：`t(...)`, `formatMessage(...)`, `$t(...)` 等 |
 | **键前缀** | 源码使用短键时自动补全命名空间前缀，再进行翻译查找 |
+| **缓存键格式化** | 写入缓存时转换键（提取段落、移除前缀、正则替换、自定义映射） |
 | **本地兜底** | 未配置远程资源时，自动回退到本地 JSON 文件 |
-| **斜杠命令** | 在 Assistant 面板中使用 `/i18n`、`/i18n-keys`、`/i18n-sync` |
+| **斜杠命令** | 在 Assistant 面板中使用 `/i18n`、`/i18n-keys`、`/i18n-search`、`/i18n-sync` |
 
 ---
 
@@ -115,6 +116,106 @@ t("button.save")
 2. `data.prefix.key` — 嵌套点分隔 + 前缀（兜底）
 3. `data["key"]` — 扁平格式，无前缀（兜底）
 4. `data.key` — 嵌套点分隔，无前缀（兜底）
+
+---
+
+### 缓存键格式化（cacheFormat）
+
+`cacheFormat` 选项用于在写入磁盘缓存时转换翻译键。当远程翻译文件的键名很长需要简化时非常有用。
+
+```json
+{
+  "cacheFormat": {
+    "enabled": true,
+    "strategy": "extract",
+    "indent": 2,
+    "extract": {
+      "skip": 0,
+      "segments": 2,
+      "from": "end"
+    },
+    "removePrefix": {
+      "prefixes": []
+    },
+    "replace": {
+      "pattern": "",
+      "replacement": "",
+      "flags": "g"
+    },
+    "custom": {
+      "mappings": {}
+    }
+  }
+}
+```
+
+#### 策略：extract（提取段落）
+
+从点分隔的键中提取指定的段落：
+
+| 输入 | 配置 | 输出 |
+|------|------|------|
+| `a.b.c.d.e` | `skip: 2, segments: 3, from: "start"` | `c.d.e` |
+| `a.b.c.d.e` | `skip: 0, segments: 2, from: "end"` | `d.e` |
+| `a.b.c.d.e` | `skip: 0, segments: 2, from: "start"` | `a.b` |
+
+- `skip`：跳过的开头段落数（默认：0）
+- `segments`：保留的段落数（默认：2）
+- `from`：跳过后的提取方向 — `"start"` 或 `"end"`（默认：`"end"`）
+
+#### 策略：removePrefix（移除前缀）
+
+从键中移除匹配的前缀：
+
+```json
+"cacheFormat": {
+  "enabled": true,
+  "strategy": "removePrefix",
+  "removePrefix": {
+    "prefixes": ["app.", "common.", "isv-common.language."]
+  }
+}
+```
+
+| 输入 | 输出 |
+|------|------|
+| `app.common.button.save` | `common.button.save` |
+| `isv-common.language.zh` | `zh` |
+
+#### 策略：replace（正则替换）
+
+使用正则表达式替换键中的模式：
+
+```json
+"cacheFormat": {
+  "enabled": true,
+  "strategy": "replace",
+  "replace": {
+    "pattern": "\\.old\\.",
+    "replacement": ".new.",
+    "flags": "g"
+  }
+}
+```
+
+#### 策略：custom（自定义映射）
+
+显式的键到键映射：
+
+```json
+"cacheFormat": {
+  "enabled": true,
+  "strategy": "custom",
+  "custom": {
+    "mappings": {
+      "legacy.key.name": "new.key.name",
+      "old.namespace.key": "renamed.key"
+    }
+  }
+}
+```
+
+未在映射中的键保持不变。
 
 ---
 

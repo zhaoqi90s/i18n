@@ -18,8 +18,9 @@ Also ships `/i18n`, `/i18n-keys`, and `/i18n-sync` slash commands for the AI Ass
 | **Multi-language** | Show multiple languages in a single hover card |
 | **Regex patterns** | Match any calling convention: `t(...)`, `formatMessage(...)`, `$t(...)`, etc. |
 | **Key prefix** | Strip a common namespace prefix so short keys still resolve correctly |
+| **Cache key formatting** | Transform keys when writing to cache (extract, remove prefix, regex replace, custom mapping) |
 | **Local fallback** | Falls back to local JSON files when no remote source is configured |
-| **Slash commands** | `/i18n`, `/i18n-keys`, and `/i18n-sync` in the Assistant panel |
+| **Slash commands** | `/i18n`, `/i18n-keys`, `/i18n-search`, and `/i18n-sync` in the Assistant panel |
 
 ---
 
@@ -91,6 +92,7 @@ Create `.i18n-viewer.json` at the **root of your project** (next to `package.jso
 | `patterns` | `string[]` | *(built-in list)* | JavaScript regex strings. **Capture group 1** must capture the i18n key. Overrides the built-in list when non-empty. |
 | `cacheDir` | `string` | `".i18n-cache"` | Directory (relative to project root) where downloaded translations are stored |
 | `ttl` | `number` | `3600` | Cache lifetime in seconds. After expiry the remote source is re-fetched. |
+| `cacheFormat` | `object` | *(see below)* | Configure key transformation when writing to cache |
 
 ### Key prefix
 
@@ -110,6 +112,106 @@ t("button.save")
 ```
 
 With `"keyPrefix": "app."`, the extension looks up `app.button.save` automatically. Lookup falls back through four strategies (flat with prefix → nested with prefix → flat without → nested without), so partial migration is handled gracefully.
+
+---
+
+### Cache key formatting
+
+The `cacheFormat` option allows you to transform translation keys when writing to the disk cache. This is useful when remote translation files have long key names that you want to simplify.
+
+```json
+{
+  "cacheFormat": {
+    "enabled": true,
+    "strategy": "extract",
+    "indent": 2,
+    "extract": {
+      "skip": 0,
+      "segments": 2,
+      "from": "end"
+    },
+    "removePrefix": {
+      "prefixes": []
+    },
+    "replace": {
+      "pattern": "",
+      "replacement": "",
+      "flags": "g"
+    },
+    "custom": {
+      "mappings": {}
+    }
+  }
+}
+```
+
+#### Strategy: extract
+
+Extract specific segments from dot-separated keys:
+
+| Input | Configuration | Output |
+|-------|--------------|--------|
+| `a.b.c.d.e` | `skip: 2, segments: 3, from: "start"` | `c.d.e` |
+| `a.b.c.d.e` | `skip: 0, segments: 2, from: "end"` | `d.e` |
+| `a.b.c.d.e` | `skip: 0, segments: 2, from: "start"` | `a.b` |
+
+- `skip`: Number of leading segments to skip (default: 0)
+- `segments`: Number of segments to keep (default: 2)
+- `from`: Direction after skipping — `"start"` or `"end"` (default: `"end"`)
+
+#### Strategy: removePrefix
+
+Remove matching prefixes from keys:
+
+```json
+"cacheFormat": {
+  "enabled": true,
+  "strategy": "removePrefix",
+  "removePrefix": {
+    "prefixes": ["app.", "common.", "isv-common.language."]
+  }
+}
+```
+
+| Input | Output |
+|-------|--------|
+| `app.common.button.save` | `common.button.save` |
+| `isv-common.language.zh` | `zh` |
+
+#### Strategy: replace
+
+Use regex to replace patterns in keys:
+
+```json
+"cacheFormat": {
+  "enabled": true,
+  "strategy": "replace",
+  "replace": {
+    "pattern": "\\.old\\.",
+    "replacement": ".new.",
+    "flags": "g"
+  }
+}
+```
+
+#### Strategy: custom
+
+Explicit key-to-key mappings:
+
+```json
+"cacheFormat": {
+  "enabled": true,
+  "strategy": "custom",
+  "custom": {
+    "mappings": {
+      "legacy.key.name": "new.key.name",
+      "old.namespace.key": "renamed.key"
+    }
+  }
+}
+```
+
+Keys not in the mappings remain unchanged.
 
 ---
 
@@ -198,7 +300,7 @@ Providing a `patterns` array in your config **replaces** the built-in list entir
 
 ## Slash commands
 
-The extension registers three slash commands for the **AI Assistant** panel.
+The extension registers four slash commands for the **AI Assistant** panel.
 
 ### `/i18n <key> [lang]`
 
@@ -218,6 +320,15 @@ List all leaf keys in the translation file for a given language, sorted alphabet
 /i18n-keys ja
 ```
 
+### `/i18n-search <text> [lang]`
+
+Fuzzy-search translation values and return matching keys. Useful when you know the translation text but need to find the key.
+
+```
+/i18n-search 保存
+/i18n-search save zh
+```
+
 ### `/i18n-sync [lang]`
 
 Show the current cache status for all configured languages and trigger a remote download. When no language is specified all configured remote sources are synced.
@@ -229,7 +340,7 @@ Show the current cache status for all configured languages and trigger a remote 
 
 > **Note:** `/i18n-sync` requires at least one supported source file to be open so the LSP server is running. If the server hasn't started yet, open any JS/TS/etc. file and re-run the command.
 
-All three commands respect `.i18n-viewer.json` configuration and the same local file search order as the hover feature.
+All commands respect `.i18n-viewer.json` configuration and the same local file search order as the hover feature.
 
 ---
 
@@ -313,9 +424,10 @@ src/
 ├── translation.rs   # File resolution, JSON formatting, key lookup, key enumeration
 └── commands/
     ├── mod.rs
-    ├── i18n.rs      # /i18n command
-    ├── i18n_keys.rs # /i18n-keys command
-    └── i18n_sync.rs # /i18n-sync command
+    ├── i18n.rs       # /i18n command
+    ├── i18n_keys.rs  # /i18n-keys command
+    ├── i18n_search.rs # /i18n-search command
+    └── i18n_sync.rs  # /i18n-sync command
 lsp/
 └── server.js        # Node.js LSP server — handles textDocument/hover
 ```
